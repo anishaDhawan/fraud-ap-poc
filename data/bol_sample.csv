@@ -1,0 +1,5 @@
+bol_id,ship_date,origin,destination
+BOL001,2025-06-30,Chicago,Atlanta
+BOL002,2025-07-01,Atlanta,Miami
+BOL003,2025-07-02,Miami,New York
+BOL005,2025-07-04,Dallas,Denver

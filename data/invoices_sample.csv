@@ -1,0 +1,8 @@
+invoice_id,vendor_name,bank_account,invoice_date,amount,bol_id
+INV1001,Acme Logistics,123456789,2025-07-01,1500.00,BOL001
+INV1002,Acme Logistics,123456789,2025-07-02,1500.00,BOL002
+INV1001,Acme Logistics,123456789,2025-07-01,1500.00,BOL001  # Duplicate
+INV1003,ColdChain Express,987654321,2025-07-03,800.00,BOL003
+INV1004,Unknown Vendor,555555555,2025-07-04,1200.00,BOL004  # Unknown vendor
+INV1005,Acme Logistics,111111111,2025-07-05,1600.00,BOL005  # Bank mismatch
+INV1006,Acme Logistics,123456789,2025-07-06,4000.00,BOL006  # Unusual amount
