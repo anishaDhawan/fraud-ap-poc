@@ -92,6 +92,18 @@ def calculate_risk_scores(df: pd.DataFrame, duplicate_invoices: pd.DataFrame,
                          near_duplicates: pd.DataFrame, unusual_amounts: pd.DataFrame,
                          early_payments: pd.DataFrame, weekend_invoices: pd.DataFrame) -> pd.DataFrame:
     """Calculate risk scores for each invoice"""
+    def update_risk_factors(df: pd.DataFrame, mask: pd.Series, factor: str, weight: float) -> None:
+        """Update risk factors and scores for matching rows."""
+        if mask.any():
+            # Add comma for existing factors
+            has_existing = df.loc[mask, 'risk_factors'].str.len() > 0
+            df.loc[mask, 'risk_factors'] = df.loc[mask, 'risk_factors'].where(~has_existing, df.loc[mask, 'risk_factors'] + ', ')
+            
+            # Add new factor and weight
+            df.loc[mask, 'risk_factors'] += factor
+            df.loc[mask, 'risk_score'] += weight
+    
+    # Initialize risk DataFrame
     risk_df = df.copy()
     risk_df['risk_score'] = 0.0
     risk_df['risk_factors'] = ''
