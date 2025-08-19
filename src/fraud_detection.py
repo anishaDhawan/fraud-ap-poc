@@ -5,6 +5,33 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import Tuple, Dict, List
+from data_validation import DataFieldValidator
+from advanced_rules import FraudDetectionEngine
+
+def analyze_invoices(invoice_data: pd.DataFrame,
+                    vendor_data: pd.DataFrame = None,
+                    payment_data: pd.DataFrame = None) -> Tuple[pd.DataFrame, Dict]:
+    """
+    Main entry point for fraud detection analysis.
+    Returns enriched DataFrame and analysis report.
+    """
+    # Initialize the fraud detection engine
+    engine = FraudDetectionEngine()
+    
+    # Prepare and validate data
+    df = engine.prepare_data(invoice_data, vendor_data, payment_data)
+    
+    # Run fraud detection
+    results_df, report = engine.detect_fraud(df)
+    
+    # Add risk levels
+    results_df['risk_level'] = pd.cut(
+        results_df['risk_score'],
+        bins=[-np.inf, 0.3, 0.6, 0.8, np.inf],
+        labels=['Low', 'Medium', 'High', 'Very High']
+    )
+    
+    return results_df, report
 
 def check_duplicate_invoices(df: pd.DataFrame) -> pd.DataFrame:
     """Check for duplicate invoice numbers from the same vendor"""
