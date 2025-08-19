@@ -84,9 +84,13 @@ def calculate_risk_scores(df: pd.DataFrame, duplicate_invoices: pd.DataFrame,
         row['risk_score'] += weight
         return row
     
+    # Create a copy of risk_df to avoid SettingWithCopyWarning
+    risk_df = risk_df.copy()
+    
     for idx, row in risk_df.iterrows():
         if row['invoice_id'] in duplicate_invoices['invoice_id'].values:
-            risk_df.loc[idx] = add_risk_factor(risk_df.loc[idx], 'Duplicate Invoice', weights['duplicate'])
+            risk_df.at[idx, 'risk_factors'] = row['risk_factors'] + (',' if row['risk_factors'] else '') + 'Duplicate Invoice'
+            risk_df.at[idx, 'risk_score'] += weights['duplicate']
         if row['invoice_id'] in near_duplicates['invoice_id'].values:
             risk_df.loc[idx] = add_risk_factor(risk_df.loc[idx], 'Near-Duplicate Invoice', weights['near_duplicate'])
         if row['invoice_id'] in unusual_amounts['invoice_id'].values:
@@ -118,18 +122,22 @@ def analyze_vendor_patterns(risk_df: pd.DataFrame) -> pd.DataFrame:
     vendor_summary['avg_risk_score'] = vendor_groups['risk_score'].mean()
     
     vendor_summary['high_risk_invoices'] = vendor_groups.apply(
-        lambda x: len(x[x['risk_level'].isin(['High', 'Very High'])])
+        lambda x: len(x[x['risk_level'].isin(['High', 'Very High'])]),
+        include_groups=False
     )
     vendor_summary['risk_ratio'] = vendor_summary['high_risk_invoices'] / vendor_summary['total_invoices']
     
     vendor_summary['duplicate_ratio'] = vendor_groups.apply(
-        lambda x: len(x[x['risk_factors'].str.contains('Duplicate', na=False)]) / len(x)
+        lambda x: len(x[x['risk_factors'].str.contains('Duplicate', na=False)]) / len(x),
+        include_groups=False
     )
     vendor_summary['unusual_amount_ratio'] = vendor_groups.apply(
-        lambda x: len(x[x['risk_factors'].str.contains('Unusual Amount', na=False)]) / len(x)
+        lambda x: len(x[x['risk_factors'].str.contains('Unusual Amount', na=False)]) / len(x),
+        include_groups=False
     )
     vendor_summary['weekend_ratio'] = vendor_groups.apply(
-        lambda x: len(x[x['risk_factors'].str.contains('Weekend', na=False)]) / len(x)
+        lambda x: len(x[x['risk_factors'].str.contains('Weekend', na=False)]) / len(x),
+        include_groups=False
     )
     
     weights = {
