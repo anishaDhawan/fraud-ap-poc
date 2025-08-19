@@ -3,6 +3,12 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from data_validation import DataFieldValidator
+from rule_patterns import (
+    VendorAnalysisRules,
+    InvoicePatternRules,
+    PaymentPatternRules,
+    DocumentAnalysisRules
+)
 
 class FraudRule:
     """Base class for fraud detection rules."""
@@ -21,104 +27,60 @@ class FraudRule:
         """Execute the rule and return DataFrame with risk factors."""
         raise NotImplementedError("Subclasses must implement execute()")
 
-class RoundAmountRule(FraudRule):
-    def __init__(self):
-        super().__init__(
-            name="Round Amount Detection",
-            required_fields={'amount_total'},
-            weight=0.3
-        )
+class Rule(FraudRule):
+    """Generic rule class that wraps a detection function."""
+    
+    def __init__(self, name: str, required_fields: Set[str], 
+                 detection_func: callable, weight: float = 1.0):
+        super().__init__(name=name, required_fields=required_fields, weight=weight)
+        self.detection_func = detection_func
     
     def execute(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Detect suspiciously round amounts."""
-        df['is_round'] = df['amount_total'].apply(
-            lambda x: float(x).is_integer() or x % 100 == 0 or x % 1000 == 0
-        )
-        return df[df['is_round']]
-
-class SequentialInvoiceRule(FraudRule):
-    def __init__(self):
-        super().__init__(
-            name="Sequential Invoice Detection",
-            required_fields={'invoice_number', 'vendor_id', 'invoice_date'},
-            weight=0.4
-        )
-    
-    def execute(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Detect sequential invoice numbers across different vendors."""
-        df['invoice_num_clean'] = df['invoice_number'].str.extract('(\d+)').astype(float)
-        
-        # Group by date and look for sequential numbers across vendors
-        suspicious = []
-        for date, group in df.groupby(df['invoice_date']):
-            sorted_invoices = group.sort_values('invoice_num_clean')
-            for i in range(len(sorted_invoices) - 1):
-                if (sorted_invoices.iloc[i+1]['invoice_num_clean'] - 
-                    sorted_invoices.iloc[i]['invoice_num_clean'] == 1 and
-                    sorted_invoices.iloc[i+1]['vendor_id'] != 
-                    sorted_invoices.iloc[i]['vendor_id']):
-                    suspicious.extend([sorted_invoices.iloc[i]['invoice_id'],
-                                    sorted_invoices.iloc[i+1]['invoice_id']])
-        
-        return df[df['invoice_id'].isin(suspicious)]
-
-class BankAccountSharingRule(FraudRule):
-    def __init__(self):
-        super().__init__(
-            name="Shared Bank Account Detection",
-            required_fields={'vendor_id', 'bank_account'},
-            weight=0.7
-        )
-    
-    def execute(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Detect multiple vendors sharing the same bank account."""
-        account_groups = df.groupby('bank_account')['vendor_id'].nunique()
-        suspicious_accounts = account_groups[account_groups > 1].index
-        return df[df['bank_account'].isin(suspicious_accounts)]
-
-class PaymentSplittingRule(FraudRule):
-    def __init__(self):
-        super().__init__(
-            name="Payment Splitting Detection",
-            required_fields={'vendor_id', 'amount_total', 'invoice_date'},
-            weight=0.5
-        )
-    
-    def execute(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Detect possible payment splitting to avoid approval thresholds."""
-        THRESHOLD = 10000  # Example threshold
-        TIME_WINDOW = pd.Timedelta(days=5)
-        
-        suspicious = []
-        for vendor in df['vendor_id'].unique():
-            vendor_df = df[df['vendor_id'] == vendor].sort_values('invoice_date')
-            
-            for i, row in vendor_df.iterrows():
-                # Look for multiple smaller payments within time window
-                window_payments = vendor_df[
-                    (vendor_df['invoice_date'] >= row['invoice_date']) &
-                    (vendor_df['invoice_date'] <= row['invoice_date'] + TIME_WINDOW)
-                ]
-                
-                if (len(window_payments) > 1 and
-                    all(amt < THRESHOLD for amt in window_payments['amount_total']) and
-                    window_payments['amount_total'].sum() > THRESHOLD):
-                    suspicious.extend(window_payments['invoice_id'].tolist())
-        
-        return df[df['invoice_id'].isin(suspicious)]
+        """Execute the wrapped detection function."""
+        return self.detection_func(df)
 
 class FraudDetectionEngine:
     """Orchestrates fraud detection rules based on available data."""
     
     def __init__(self):
         self.validator = DataFieldValidator()
-        self.rules: List[FraudRule] = [
-            RoundAmountRule(),
-            SequentialInvoiceRule(),
-            BankAccountSharingRule(),
-            PaymentSplittingRule(),
-            # Add more rules here
-        ]
+        # Initialize rules based on the patterns available in rule_patterns.py
+        self.rules: List[FraudRule] = []
+        
+        # Vendor Analysis Rules
+        self.rules.extend([
+            Rule("Bank Account Changes", {'vendor_id', 'bank_account', 'invoice_date'},
+                 VendorAnalysisRules.detect_bank_changes, 0.8),
+            Rule("New Large Vendors", {'vendor_id', 'registration_date', 'amount_total'},
+                 VendorAnalysisRules.detect_new_large_vendors, 0.7),
+            Rule("Shared Contact Details", {'vendor_id', 'address', 'phone_number', 'email'},
+                 VendorAnalysisRules.detect_shared_details, 0.6)
+        ])
+        
+        # Invoice Pattern Rules
+        self.rules.extend([
+            Rule("Round Amounts", {'amount_total'},
+                 InvoicePatternRules.detect_round_amounts, 0.3),
+            Rule("Irregular Invoice Sequence", {'vendor_id', 'invoice_number'},
+                 InvoicePatternRules.analyze_invoice_sequence, 0.5)
+        ])
+        
+        # Payment Pattern Rules
+        self.rules.extend([
+            Rule("Split Payments", {'vendor_id', 'amount_total', 'invoice_date'},
+                 PaymentPatternRules.detect_split_payments, 0.7),
+            Rule("Unusual Payment Timing", {'invoice_date', 'payment_date'},
+                 PaymentPatternRules.detect_unusual_timing, 0.4)
+        ])
+        
+        # Document Analysis Rules
+        required_fields = {'invoice_id', 'vendor_id', 'amount_total', 'invoice_date'}
+        self.rules.extend([
+            Rule("Missing Required Fields", required_fields,
+                 lambda df: DocumentAnalysisRules.check_required_fields(df, required_fields), 0.6),
+            Rule("Inconsistent Formatting", {'vendor_id', 'invoice_number'},
+                 DocumentAnalysisRules.detect_inconsistent_formatting, 0.5)
+        ])
         self.available_rules: List[FraudRule] = []
 
     def prepare_data(self, invoice_data: pd.DataFrame,
@@ -151,19 +113,27 @@ class FraudDetectionEngine:
         self.available_rules = [rule for rule in self.rules if rule.can_execute(df)]
         
         # Execute rules and combine results
+        # Create a fresh copy to avoid chained indexing
         results_df = df.copy()
-        results_df['risk_factors'] = ''
-        results_df['risk_score'] = 0.0
+        results_df.loc[:, 'risk_factors'] = ''
+        results_df.loc[:, 'risk_score'] = 0.0
         
         rule_results = {}
         for rule in self.available_rules:
             suspicious_records = rule.execute(df)
             if not suspicious_records.empty:
-                for idx in suspicious_records.index:
-                    if results_df.loc[idx, 'risk_factors']:
-                        results_df.loc[idx, 'risk_factors'] += ', '
-                    results_df.loc[idx, 'risk_factors'] += rule.name
-                    results_df.loc[idx, 'risk_score'] += rule.weight * rule.confidence_score
+                # Create mask for suspicious records
+                mask = results_df.index.isin(suspicious_records.index)
+                
+                # Update risk factors
+                current_factors = results_df.loc[mask, 'risk_factors']
+                has_existing = current_factors.str.len() > 0
+                results_df.loc[mask, 'risk_factors'] = (
+                    current_factors.where(~has_existing, current_factors + ', ') + rule.name
+                )
+                
+                # Update risk scores
+                results_df.loc[mask, 'risk_score'] += rule.weight * rule.confidence_score
                 
                 rule_results[rule.name] = {
                     'suspicious_count': len(suspicious_records),
